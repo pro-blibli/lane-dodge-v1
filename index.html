@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>Lane Dodge</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #050710;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    color: #e8ecff;
+    overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+  #app {
+    width: 100%; min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center;
+    padding: max(20px, env(safe-area-inset-top)) 14px max(20px, env(safe-area-inset-bottom));
+    background: radial-gradient(120% 90% at 50% 0%, #12182b 0%, #070a14 60%, #050710 100%);
+    user-select: none;
+  }
+
+  /* ---------- HUD ---------- */
+  .hud {
+    display: flex; justify-content: space-between;
+    width: min(360px, 100%); margin-bottom: 10px;
+    font-family: 'Courier New', monospace; letter-spacing: 1px;
+  }
+  .hud .label { font-size: 10px; color: #5b6b9c; letter-spacing: 2px; }
+  .hud .score { font-size: 26px; font-weight: 700; color: #4ff0ff; text-shadow: 0 0 12px rgba(79,240,255,0.6); }
+  .hud .best { font-size: 26px; font-weight: 700; color: #ff5fd1; text-align: right; }
+  .powerup-bar { display: flex; gap: 6px; min-height: 22px; margin-top: 2px; }
+  .chip {
+    font-size: 10px; padding: 3px 8px; border-radius: 999px;
+    border: 1px solid currentColor; letter-spacing: 1px;
+  }
+
+  /* ---------- board ---------- */
+  #board {
+    position: relative;
+    width: min(360px, 100%); height: min(480px, 62vh);
+    border-radius: 18px; overflow: hidden;
+    border: 1px solid rgba(120,150,255,0.18);
+    background: linear-gradient(180deg, #0a0f1e 0%, #0c1224 60%, #0a0f1e 100%);
+    box-shadow: 0 0 30px rgba(79,240,255,0.08);
+    transition: box-shadow 0.15s ease;
+  }
+  #board.hit { box-shadow: 0 0 0 2px #ff3b6b, 0 0 40px rgba(255,59,107,0.5); }
+
+  .divider {
+    position: absolute; top: 0; bottom: 0; width: 1px;
+    background: repeating-linear-gradient(180deg, rgba(120,150,255,0.25) 0 14px, transparent 14px 28px);
+  }
+
+  .obstacle {
+    position: absolute; height: 22px; border-radius: 6px;
+    background: linear-gradient(180deg, #ff5fd1 0%, #b8228f 100%);
+    box-shadow: 0 0 14px rgba(255,95,209,0.55);
+  }
+  .obstacle.mover {
+    background: linear-gradient(180deg, #ffb800 0%, #b87a00 100%);
+    box-shadow: 0 0 14px rgba(255,184,0,0.55);
+  }
+
+  .powerup {
+    position: absolute; width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 800;
+  }
+  .powerup.shield { background: radial-gradient(circle, #4ff0ff, #0a5c66); box-shadow: 0 0 14px rgba(79,240,255,0.8); color: #06222a; }
+  .powerup.slowmo { background: radial-gradient(circle, #ffd54f, #8a5a00); box-shadow: 0 0 14px rgba(255,213,79,0.8); color: #2a1c00; }
+  .powerup.multi  { background: radial-gradient(circle, #ff5fd1, #7a1361); box-shadow: 0 0 14px rgba(255,95,209,0.8); color: #2a0022; }
+
+  #player {
+    position: absolute; top: 84%; transform: translate(-50%, -50%);
+    max-width: 46px; aspect-ratio: 1/1;
+    border-radius: 10px;
+    background: linear-gradient(180deg, #7ef9ff 0%, #2fb8ff 100%);
+    box-shadow: 0 0 18px rgba(79,240,255,0.85);
+    transition: left 0.12s ease;
+  }
+  #player.shielded {
+    box-shadow: 0 0 0 4px rgba(79,240,255,0.55), 0 0 24px rgba(79,240,255,0.9);
+  }
+
+  /* ---------- overlays (home + game over share this) ---------- */
+  #overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px;
+    background: rgba(5,7,16,0.86); text-align: center; padding: 20px;
+  }
+  #overlay .title {
+    font-size: 30px; font-weight: 800; letter-spacing: 4px;
+    color: #4ff0ff; text-shadow: 0 0 18px rgba(79,240,255,0.7);
+    margin-bottom: 2px;
+  }
+  #overlay .eyebrow { font-size: 13px; letter-spacing: 3px; color: #5b6b9c; }
+  #overlay .finalScore { font-size: 22px; font-weight: 700; color: #ff5fd1; }
+  #overlay button.primary {
+    margin-top: 6px; padding: 12px 30px; border-radius: 999px;
+    border: 1px solid rgba(79,240,255,0.6); background: rgba(79,240,255,0.12);
+    color: #4ff0ff; font-size: 15px; font-weight: 700; letter-spacing: 1px; cursor: pointer;
+  }
+  #overlay .hint { font-size: 11px; color: #4a5878; margin-top: 4px; }
+  #overlay .countdown {
+    font-size: 72px; font-weight: 800; color: #ffd54f;
+    text-shadow: 0 0 26px rgba(255,213,79,0.8);
+    animation: countPop 0.35s ease;
+  }
+  @keyframes countPop {
+    from { transform: scale(0.5); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+  #overlay .credit {
+    position: absolute; bottom: 14px; left: 0; right: 0;
+    font-size: 10px; letter-spacing: 1.5px; color: #3c4666;
+  }
+  #settingsBtn {
+    position: absolute; top: 12px; right: 12px;
+    width: 30px; height: 30px; border-radius: 50%;
+    border: 1px solid rgba(120,150,255,0.25); background: rgba(255,255,255,0.03);
+    color: #8b9ad6; font-size: 14px; cursor: pointer; z-index: 5;
+  }
+  #muteBtn {
+    position: absolute; top: 12px; left: 12px;
+    width: 30px; height: 30px; border-radius: 50%;
+    border: 1px solid rgba(120,150,255,0.25); background: rgba(255,255,255,0.03);
+    color: #8b9ad6; font-size: 13px; cursor: pointer; z-index: 5;
+  }
+
+  .controls { display: flex; gap: 16px; margin-top: 18px; width: min(360px, 100%); }
+  .controls button {
+    flex: 1; padding: 16px 0; border-radius: 14px;
+    border: 1px solid rgba(120,150,255,0.25); background: rgba(255,255,255,0.03);
+    color: #e8ecff; font-size: 18px; cursor: pointer;
+  }
+
+  /* ---------- settings modal ---------- */
+  #settingsModal {
+    position: fixed; inset: 0; background: rgba(3,4,10,0.88);
+    display: none; align-items: center; justify-content: center; z-index: 20;
+    padding: 20px;
+  }
+  #settingsModal.open { display: flex; }
+  .panel {
+    width: min(360px, 100%); background: #0b1122; border: 1px solid rgba(120,150,255,0.2);
+    border-radius: 16px; padding: 20px; max-height: 86vh; overflow-y: auto;
+  }
+  .panel h3 { margin: 0 0 4px; font-size: 15px; letter-spacing: 1px; color: #e8ecff; }
+  .panel .sub { font-size: 11px; color: #5b6b9c; margin-bottom: 14px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 11px; color: #8b9ad6; margin-bottom: 6px; letter-spacing: 0.5px; }
+  .field input[type="text"], .field input[type="password"] {
+    width: 100%; padding: 10px 12px; border-radius: 10px;
+    border: 1px solid rgba(120,150,255,0.25); background: #070a14; color: #e8ecff; font-size: 13px;
+  }
+  .field input[type="file"] { font-size: 12px; color: #8b9ad6; }
+  .field .filename { font-size: 11px; color: #4ff0ff; margin-top: 4px; }
+  .panel .row { display: flex; gap: 10px; margin-top: 16px; }
+  .panel .row button {
+    flex: 1; padding: 11px 0; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .panel .saveBtn { border: 1px solid rgba(79,240,255,0.6); background: rgba(79,240,255,0.12); color: #4ff0ff; }
+  .panel .closeBtn { border: 1px solid rgba(120,150,255,0.2); background: transparent; color: #8b9ad6; }
+  .panel .note { font-size: 10.5px; color: #4a5878; line-height: 1.5; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="hud">
+    <div>
+      <div class="label">SCORE</div>
+      <div class="score" id="scoreEl">0</div>
+    </div>
+    <div style="text-align:center;">
+      <div class="label">LEVEL</div>
+      <div class="score" id="levelEl" style="color:#ffd54f; text-shadow:0 0 12px rgba(255,213,79,0.6);">1</div>
+    </div>
+    <div>
+      <div class="label" style="text-align:right;">BEST</div>
+      <div class="best" id="bestEl">0</div>
+    </div>
+  </div>
+  <div class="powerup-bar" id="powerupBar"></div>
+
+  <div id="board">
+    <button id="muteBtn" title="Mute music">♪</button>
+    <button id="settingsBtn" title="Settings">⚙</button>
+    <div class="divider" style="left:33.333%;"></div>
+    <div class="divider" style="left:66.666%;"></div>
+    <div id="player"></div>
+
+    <div id="overlay">
+      <div class="title" id="homeTitle">LANE DODGE</div>
+      <div class="eyebrow" id="eyebrow">tap play to start</div>
+      <div class="finalScore" id="finalScore" style="display:none;"></div>
+      <button class="primary" id="startBtn">PLAY</button>
+      <div class="hint" id="hintEl">Arrows below or ← / → keys</div>
+      <div class="credit" id="creditEl">developed by promitdey</div>
+      <div class="countdown" id="countdownEl" style="display:none;"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="leftBtn">◀</button>
+    <button id="rightBtn">▶</button>
+  </div>
+</div>
+
+<!-- Settings modal: background music (built-in Psytrance loop or your own upload) -->
+<div id="settingsModal">
+  <div class="panel">
+    <h3>SETTINGS</h3>
+    <div class="sub">A built-in psytrance loop plays by default — upload your own track to override it.</div>
+
+    <div class="field">
+      <label>Upload your own track (mp3/wav, optional)</label>
+      <input type="file" id="musicFile" accept="audio/*" />
+      <div class="filename" id="musicFileName"></div>
+    </div>
+
+    <div class="row">
+      <button class="closeBtn" id="resetMusicBtn" type="button" style="flex:1;">Reset to built-in Psytrance</button>
+    </div>
+    <div class="row">
+      <button class="closeBtn" id="closeSettingsBtn" type="button" style="flex:1;">Close</button>
+    </div>
+    <div class="note">
+      The built-in loop is generated live in the browser (Web Audio), so
+      there's no file to load and nothing to license.
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------------------------------------------------------------
+// CONFIG — tune game feel here
+// ---------------------------------------------------------------
+const CONFIG = {
+  lanes: 3,
+  baseFallSpeed: 3.2,             // the "1x" reference speed levels are a multiple of
+  levelDurationMs: 30000,         // how long each level lasts before advancing
+  moverShiftPerMs: 0.018,         // how fast a zigzag obstacle drifts across lanes
+  baseSpawnMs: 900,
+  minSpawnMs: 430,
+  powerupSpawnEveryMs: [6000, 11000],
+  powerupDurationMs: { slowmo: 4000, multi: 5000 },
+  slowmoFactor: 0.5,
+  musicVolume: 0.35,
+  // Hand-authored levels. Index 0 = first 30s, index 1 = next 30s, etc.
+  // Anything past the end of this array is generated procedurally (see levelForIndex).
+  levels: [
+    { speedMult: 0.25, wide: false, moverEvery: null },       // Level 1: single-lane only
+    { speedMult: 0.35, wide: true,  moverEvery: null },       // Level 2: single + double lane mixed
+    { speedMult: 0.5,  wide: true,  moverEvery: [6, 8] },     // Level 3: zigzag every 6-8 dodges
+  ],
+};
+
+// Levels beyond the hand-authored list above keep escalating the same way:
+// speed climbs another 0.1x per level, and the zigzag shows up more often.
+function levelForIndex(i) {
+  if (i < CONFIG.levels.length) return CONFIG.levels[i];
+  const extra = i - (CONFIG.levels.length - 1);
+  const last = CONFIG.levels[CONFIG.levels.length - 1];
+  const lo = Math.max(3, (last.moverEvery ? last.moverEvery[0] : 6) - extra);
+  const hi = Math.max(lo + 1, (last.moverEvery ? last.moverEvery[1] : 8) - extra);
+  return {
+    speedMult: last.speedMult + extra * 0.1,
+    wide: true,
+    moverEvery: [lo, hi],
+  };
+}
+// ---------------------------------------------------------------
+
+const boardEl = document.getElementById("board");
+const playerEl = document.getElementById("player");
+const scoreEl = document.getElementById("scoreEl");
+const levelEl = document.getElementById("levelEl");
+const bestEl = document.getElementById("bestEl");
+const overlayEl = document.getElementById("overlay");
+const homeTitleEl = document.getElementById("homeTitle");
+const eyebrowEl = document.getElementById("eyebrow");
+const finalScoreEl = document.getElementById("finalScore");
+const startBtn = document.getElementById("startBtn");
+const hintEl = document.getElementById("hintEl");
+const creditEl = document.getElementById("creditEl");
+const countdownEl = document.getElementById("countdownEl");
+const leftBtn = document.getElementById("leftBtn");
+const rightBtn = document.getElementById("rightBtn");
+const powerupBar = document.getElementById("powerupBar");
+const muteBtn = document.getElementById("muteBtn");
+const settingsBtn = document.getElementById("settingsBtn");
+const settingsModal = document.getElementById("settingsModal");
+const closeSettingsBtn = document.getElementById("closeSettingsBtn");
+const resetMusicBtn = document.getElementById("resetMusicBtn");
+const musicFileInput = document.getElementById("musicFile");
+const musicFileName = document.getElementById("musicFileName");
+
+let lane = 1;
+let obstacles = [];
+let powerups = [];
+let activePowerups = {};
+let hasShield = false;
+let score = 0;
+let best = Number(localStorage.getItem("laneDodgeBest") || 0);
+let spawnTimer = 0;
+let nextPowerupIn = randRange(...CONFIG.powerupSpawnEveryMs);
+let status = "home"; // home | countdown | playing | crashed
+let lastTs = null;
+let rafId = null;
+let idCounter = 0;
+let musicMuted = localStorage.getItem("laneDodgeMuted") === "1";
+
+// level / difficulty state
+let elapsedMs = 0;
+let levelIndex = 0;
+let currentLevel = levelForIndex(0);
+let dodgesSinceMoverCheck = 0;
+let nextMoverAt = 0;
+let forceNextMover = false;
+
+// ---------------------------------------------------------------
+// Music: a small synthesized psytrance loop (Web Audio, no file
+// needed) that plays by default, or the player's own uploaded track
+// as an override.
+// ---------------------------------------------------------------
+bestEl.textContent = best;
+
+const bgMusic = new Audio(); // used only if the player uploads their own track
+bgMusic.loop = true;
+bgMusic.volume = CONFIG.musicVolume;
+
+let audioCtx = null;
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  return audioCtx;
+}
+
+const Psytrance = (() => {
+  let ctx = null;
+  let master = null;
+  let playing = false;
+  let timerId = null;
+  let nextStepTime = 0;
+  let step = 0;
+  const bpm = 145;
+  const stepDur = 60 / bpm / 4; // 16th note
+  const rootFreq = 55; // A1
+  const bassSemis = [0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 5, 0, 3, 0]; // rolling psy bassline
+  const kickSteps = new Set([0, 4, 8, 12]);
+  const hatSteps = new Set([2, 6, 10, 14]);
+
+  function ensureCtx() {
+    if (!master) {
+      ctx = getAudioCtx();
+      master = ctx.createGain();
+      master.gain.value = musicMuted ? 0 : CONFIG.musicVolume;
+      master.connect(ctx.destination);
+    }
+    return ctx;
+  }
+
+  function kick(time) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(150, time);
+    osc.frequency.exponentialRampToValueAtTime(40, time + 0.12);
+    gain.gain.setValueAtTime(0.9, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.15);
+    osc.connect(gain).connect(master);
+    osc.start(time);
+    osc.stop(time + 0.16);
+  }
+
+  function bass(time, semi) {
+    const freq = rootFreq * Math.pow(2, semi / 12);
+    const osc = ctx.createOscillator();
+    const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(freq, time);
+    filter.type = "lowpass";
+    filter.Q.value = 8;
+    filter.frequency.setValueAtTime(1200, time);
+    filter.frequency.exponentialRampToValueAtTime(180, time + 0.08);
+    gain.gain.setValueAtTime(0.32, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.09);
+    osc.connect(filter).connect(gain).connect(master);
+    osc.start(time);
+    osc.stop(time + 0.1);
+  }
+
+  function hat(time) {
+    const size = Math.floor(ctx.sampleRate * 0.05);
+    const buffer = ctx.createBuffer(1, size, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < size; i++) data[i] = Math.random() * 2 - 1;
+    const noise = ctx.createBufferSource();
+    noise.buffer = buffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "highpass";
+    filter.frequency.value = 7000;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.16, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.04);
+    noise.connect(filter).connect(gain).connect(master);
+    noise.start(time);
+  }
+
+  function scheduleStep(s, time) {
+    if (kickSteps.has(s)) kick(time);
+    else bass(time, bassSemis[s]);
+    if (hatSteps.has(s)) hat(time);
+  }
+
+  function scheduler() {
+    while (nextStepTime < ctx.currentTime + 0.1) {
+      scheduleStep(step, nextStepTime);
+      nextStepTime += stepDur;
+      step = (step + 1) % 16;
+    }
+  }
+
+  return {
+    start() {
+      if (playing) return;
+      ensureCtx();
+      if (ctx.state === "suspended") ctx.resume();
+      playing = true;
+      step = 0;
+      nextStepTime = ctx.currentTime + 0.05;
+      timerId = setInterval(scheduler, 25);
+    },
+    stop() {
+      playing = false;
+      if (timerId) { clearInterval(timerId); timerId = null; }
+    },
+    setMuted(muted) {
+      if (master) master.gain.value = muted ? 0 : CONFIG.musicVolume;
+    },
+  };
+})();
+
+// ---------------------------------------------------------------
+// SFX: crash, shield, power-ups, countdown beeps — all synthesized,
+// independent of the music mute toggle so gameplay cues stay audible.
+// ---------------------------------------------------------------
+const SFX = (() => {
+  function noiseBuffer(ctx, duration) {
+    const size = Math.floor(ctx.sampleRate * duration);
+    const buffer = ctx.createBuffer(1, size, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < size; i++) data[i] = Math.random() * 2 - 1;
+    return buffer;
+  }
+
+  function tone(time, freq, dur, type, gainVal) {
+    const ctx = getAudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, time);
+    gain.gain.setValueAtTime(gainVal, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + dur);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(time);
+    osc.stop(time + dur + 0.02);
+  }
+
+  function noiseHit(time, duration, filterType, filterFreq, gainVal) {
+    const ctx = getAudioCtx();
+    const noise = ctx.createBufferSource();
+    noise.buffer = noiseBuffer(ctx, duration);
+    const filter = ctx.createBiquadFilter();
+    filter.type = filterType;
+    filter.frequency.value = filterFreq;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(gainVal, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
+    noise.connect(filter).connect(gain).connect(ctx.destination);
+    noise.start(time);
+  }
+
+  return {
+    countdownBeep(n) {
+      const ctx = getAudioCtx();
+      const t = ctx.currentTime;
+      if (n === 0) tone(t, 880, 0.32, "square", 0.22); // "GO"
+      else tone(t, 440, 0.14, "square", 0.2);
+    },
+    crash() {
+      const ctx = getAudioCtx();
+      const t = ctx.currentTime;
+      tone(t, 80, 0.3, "sawtooth", 0.45);
+      noiseHit(t, 0.28, "lowpass", 1200, 0.5);
+    },
+    shieldUp() {
+      const ctx = getAudioCtx();
+      const t = ctx.currentTime;
+      tone(t, 520, 0.12, "sine", 0.22);
+      tone(t + 0.09, 780, 0.16, "sine", 0.22);
+    },
+    shieldBreak() {
+      const ctx = getAudioCtx();
+      const t = ctx.currentTime;
+      tone(t, 600, 0.1, "square", 0.18);
+      noiseHit(t, 0.2, "highpass", 2000, 0.32);
+    },
+    powerup(type) {
+      const ctx = getAudioCtx();
+      const t = ctx.currentTime;
+      if (type === "shield") {
+        this.shieldUp();
+      } else if (type === "slowmo") {
+        tone(t, 500, 0.12, "triangle", 0.22);
+        tone(t + 0.1, 350, 0.18, "triangle", 0.18);
+      } else if (type === "multi") {
+        tone(t, 660, 0.08, "square", 0.2);
+        tone(t + 0.07, 880, 0.08, "square", 0.2);
+        tone(t + 0.14, 1100, 0.14, "square", 0.2);
+      }
+    },
+  };
+})();
+
+function playMusic() {
+  if (bgMusic.src) {
+    bgMusic.currentTime = 0;
+    bgMusic.play().catch(() => {});
+  } else {
+    Psytrance.start();
+  }
+}
+function stopMusic() {
+  bgMusic.pause();
+  Psytrance.stop();
+}
+
+musicFileInput.addEventListener("change", () => {
+  const file = musicFileInput.files[0];
+  if (!file) return;
+  Psytrance.stop();
+  bgMusic.src = URL.createObjectURL(file);
+  musicFileName.textContent = file.name;
+  if (status === "playing") playMusic();
+});
+
+resetMusicBtn.addEventListener("click", () => {
+  bgMusic.pause();
+  bgMusic.removeAttribute("src");
+  bgMusic.load();
+  musicFileName.textContent = "";
+  musicFileInput.value = "";
+  if (status === "playing") playMusic();
+});
+
+muteBtn.addEventListener("click", () => {
+  musicMuted = !musicMuted;
+  localStorage.setItem("laneDodgeMuted", musicMuted ? "1" : "0");
+  updateMuteBtn();
+});
+function updateMuteBtn() {
+  bgMusic.muted = musicMuted;
+  Psytrance.setMuted(musicMuted);
+  muteBtn.textContent = musicMuted ? "🔇" : "♪";
+}
+updateMuteBtn();
+
+settingsBtn.addEventListener("click", () => settingsModal.classList.add("open"));
+closeSettingsBtn.addEventListener("click", () => settingsModal.classList.remove("open"));
+
+// ---------------------------------------------------------------
+// Game logic
+// ---------------------------------------------------------------
+function randRange(a, b) { return a + Math.random() * (b - a); }
+function laneWidthPct() { return 100 / CONFIG.lanes; }
+
+function reset() {
+  lane = 1;
+  obstacles = [];
+  powerups = [];
+  activePowerups = {};
+  hasShield = false;
+  score = 0;
+  spawnTimer = 0;
+  nextPowerupIn = randRange(...CONFIG.powerupSpawnEveryMs);
+  idCounter = 0;
+  elapsedMs = 0;
+  levelIndex = 0;
+  currentLevel = levelForIndex(0);
+  dodgesSinceMoverCheck = 0;
+  nextMoverAt = randRange(...(currentLevel.moverEvery || [6, 8]));
+  forceNextMover = false;
+  renderPlayer();
+  renderScore();
+  renderPowerupBar();
+  renderLevel();
+  clearBoardChildren();
+}
+
+function renderLevel() {
+  levelEl.textContent = levelIndex + 1;
+}
+
+function clearBoardChildren() {
+  boardEl.querySelectorAll(".obstacle, .powerup").forEach((el) => el.remove());
+}
+
+function start() {
+  if (status === "countdown") return; // ignore repeat taps mid-countdown
+  getAudioCtx(); // unlock audio on this user gesture
+  reset();
+  status = "countdown";
+
+  homeTitleEl.style.display = "none";
+  eyebrowEl.style.display = "none";
+  finalScoreEl.style.display = "none";
+  startBtn.style.display = "none";
+  hintEl.style.display = "none";
+  creditEl.style.display = "none";
+  overlayEl.style.display = "flex";
+
+  let n = 3;
+  countdownEl.style.display = "block";
+  showCount(n);
+  SFX.countdownBeep(n);
+
+  const iv = setInterval(() => {
+    n -= 1;
+    if (n > 0) {
+      showCount(n);
+      SFX.countdownBeep(n);
+    } else {
+      showCount("GO");
+      SFX.countdownBeep(0);
+      clearInterval(iv);
+      setTimeout(beginRun, 450);
+    }
+  }, 800);
+}
+
+function showCount(text) {
+  countdownEl.style.animation = "none";
+  // force reflow so the pop animation replays for each new number
+  void countdownEl.offsetWidth;
+  countdownEl.style.animation = "";
+  countdownEl.textContent = text;
+}
+
+function beginRun() {
+  countdownEl.style.display = "none";
+  startBtn.style.display = "";
+  hintEl.style.display = "";
+  creditEl.style.display = "";
+  status = "playing";
+  overlayEl.style.display = "none";
+  lastTs = null;
+  playMusic();
+  rafId = requestAnimationFrame(tick);
+}
+
+function crash() {
+  if (hasShield) {
+    hasShield = false;
+    playerEl.classList.remove("shielded");
+    obstacles = obstacles.filter((o) => !collides(o));
+    SFX.shieldBreak();
+    return false;
+  }
+  return true;
+}
+
+function collides(o) {
+  const inBand = o.y > 78 && o.y < 92;
+  const lanes = o.wide ? [Math.floor(o.lane), Math.floor(o.lane) + 1] : [Math.round(o.lane)];
+  return inBand && lanes.includes(lane);
+}
+
+function gameOver() {
+  status = "crashed";
+  cancelAnimationFrame(rafId);
+  stopMusic();
+  SFX.crash();
+  best = Math.max(best, Math.floor(score));
+  localStorage.setItem("laneDodgeBest", best);
+  bestEl.textContent = best;
+  homeTitleEl.style.display = "none";
+  eyebrowEl.style.display = "";
+  eyebrowEl.textContent = "CRASHED";
+  finalScoreEl.style.display = "block";
+  startBtn.style.display = "";
+  hintEl.style.display = "";
+  creditEl.style.display = "";
+  finalScoreEl.textContent = "Score: " + Math.floor(score);
+  startBtn.textContent = "RETRY";
+  overlayEl.style.display = "flex";
+  boardEl.classList.add("hit");
+  setTimeout(() => boardEl.classList.remove("hit"), 400);
+}
+
+function moveLane(dir) {
+  if (status !== "playing") return;
+  lane = Math.min(CONFIG.lanes - 1, Math.max(0, lane + dir));
+  renderPlayer();
+}
+
+function renderPlayer() {
+  const lw = laneWidthPct();
+  playerEl.style.left = (lane * lw + lw / 2) + "%";
+  playerEl.style.width = (lw * 0.5) + "%";
+  playerEl.classList.toggle("shielded", hasShield);
+}
+
+function renderScore() {
+  scoreEl.textContent = Math.floor(score);
+}
+
+function renderPowerupBar() {
+  const now = performance.now();
+  const chips = [];
+  if (hasShield) chips.push({ label: "SHIELD", color: "#4ff0ff" });
+  if (activePowerups.slowmo && activePowerups.slowmo > now) {
+    const secs = ((activePowerups.slowmo - now) / 1000).toFixed(1);
+    chips.push({ label: `SLOW-MO ${secs}s`, color: "#ffd54f" });
+  }
+  if (activePowerups.multi && activePowerups.multi > now) {
+    const secs = ((activePowerups.multi - now) / 1000).toFixed(1);
+    chips.push({ label: `2× SCORE ${secs}s`, color: "#ff5fd1" });
+  }
+  powerupBar.innerHTML = chips
+    .map((c) => `<span class="chip" style="color:${c.color}">${c.label}</span>`)
+    .join("");
+}
+
+function spawnObstacle() {
+  const lw = laneWidthPct();
+  let mover = false;
+  let wide = false;
+
+  if (forceNextMover) {
+    mover = true;
+    forceNextMover = false;
+  } else {
+    wide = currentLevel.wide && Math.random() < 0.22;
+  }
+
+  const startLane = wide
+    ? Math.min(Math.floor(Math.random() * CONFIG.lanes), CONFIG.lanes - 2)
+    : Math.floor(Math.random() * CONFIG.lanes);
+  const o = { id: ++idCounter, lane: startLane, y: -12, wide, mover, dir: Math.random() < 0.5 ? -1 : 1 };
+  obstacles.push(o);
+  const el = document.createElement("div");
+  el.className = "obstacle" + (mover ? " mover" : "");
+  el.style.width = (wide ? lw * 2 - 8 : lw - 8) + "%";
+  el.style.top = o.y + "%";
+  el.style.left = (o.lane * lw + 4) + "%";
+  boardEl.appendChild(el);
+  o.el = el;
+}
+
+function spawnPowerup() {
+  const types = ["shield", "slowmo", "multi"];
+  const type = types[Math.floor(Math.random() * types.length)];
+  const l = Math.floor(Math.random() * CONFIG.lanes);
+  const p = { id: ++idCounter, lane: l, y: -10, type };
+  powerups.push(p);
+  const el = document.createElement("div");
+  el.className = "powerup " + type;
+  el.textContent = type === "shield" ? "S" : type === "slowmo" ? "T" : "×2";
+  el.style.top = p.y + "%";
+  el.style.left = (p.lane * laneWidthPct() + laneWidthPct() / 2) + "%";
+  el.style.marginLeft = "-14px";
+  boardEl.appendChild(el);
+  p.el = el;
+}
+
+function tick(ts) {
+  if (lastTs == null) lastTs = ts;
+  const dt = Math.min(40, ts - lastTs);
+  lastTs = ts;
+  const now = performance.now();
+
+  const slowActive = activePowerups.slowmo && activePowerups.slowmo > now;
+  const multActive = activePowerups.multi && activePowerups.multi > now;
+
+  elapsedMs += dt;
+  const newLevelIndex = Math.floor(elapsedMs / CONFIG.levelDurationMs);
+  if (newLevelIndex !== levelIndex) {
+    levelIndex = newLevelIndex;
+    currentLevel = levelForIndex(levelIndex);
+    dodgesSinceMoverCheck = 0;
+    nextMoverAt = randRange(...(currentLevel.moverEvery || [6, 8]));
+    renderLevel();
+  }
+
+  const speed = CONFIG.baseFallSpeed * currentLevel.speedMult;
+  const effectiveSpeed = speed * (slowActive ? CONFIG.slowmoFactor : 1);
+
+  spawnTimer -= dt;
+  nextPowerupIn -= dt;
+
+  const lw = laneWidthPct();
+
+  obstacles.forEach((o) => {
+    o.y += effectiveSpeed * (dt / 16.6);
+    if (o.mover) {
+      o.lane += o.dir * CONFIG.moverShiftPerMs * dt;
+      if (o.lane <= 0) { o.lane = 0; o.dir = 1; }
+      if (o.lane >= CONFIG.lanes - 1) { o.lane = CONFIG.lanes - 1; o.dir = -1; }
+    }
+    o.el.style.top = o.y + "%";
+    o.el.style.left = (o.lane * lw + 4) + "%";
+  });
+
+  powerups.forEach((p) => {
+    p.y += effectiveSpeed * (dt / 16.6);
+    p.el.style.top = p.y + "%";
+    p.el.style.left = (p.lane * lw + lw / 2) + "%";
+    p.el.style.marginLeft = "-14px";
+  });
+
+  if (spawnTimer <= 0) {
+    spawnObstacle();
+    spawnTimer = Math.max(CONFIG.minSpawnMs, CONFIG.baseSpawnMs - speed * 60);
+  }
+  if (nextPowerupIn <= 0) {
+    spawnPowerup();
+    nextPowerupIn = randRange(...CONFIG.powerupSpawnEveryMs);
+  }
+
+  let crashed = false;
+  obstacles = obstacles.filter((o) => {
+    if (o.y > 110) {
+      o.el.remove();
+      if (currentLevel.moverEvery) {
+        dodgesSinceMoverCheck++;
+        if (dodgesSinceMoverCheck >= nextMoverAt) {
+          forceNextMover = true;
+          dodgesSinceMoverCheck = 0;
+          nextMoverAt = randRange(...currentLevel.moverEvery);
+        }
+      }
+      return false; // cleared = dodged
+    }
+    if (collides(o)) {
+      if (crash()) crashed = true;
+      o.el.remove();
+      return false;
+    }
+    return true;
+  });
+
+  powerups = powerups.filter((p) => {
+    if (p.y > 110) { p.el.remove(); return false; }
+    const inBand = p.y > 76 && p.y < 94;
+    if (inBand && p.lane === lane) {
+      if (p.type === "shield") hasShield = true;
+      if (p.type === "slowmo") activePowerups.slowmo = now + CONFIG.powerupDurationMs.slowmo;
+      if (p.type === "multi") activePowerups.multi = now + CONFIG.powerupDurationMs.multi;
+      SFX.powerup(p.type);
+      renderPlayer();
+      p.el.remove();
+      return false;
+    }
+    return true;
+  });
+
+  score += dt * 0.01 * (1 + speed * 0.08) * (multActive ? 2 : 1);
+  renderScore();
+  renderPowerupBar();
+
+  if (crashed) { gameOver(); return; }
+  rafId = requestAnimationFrame(tick);
+}
+
+startBtn.addEventListener("click", (e) => { e.stopPropagation(); start(); });
+leftBtn.addEventListener("click", () => moveLane(-1));
+rightBtn.addEventListener("click", () => moveLane(1));
+window.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowLeft" || e.key === "a") moveLane(-1);
+  if (e.key === "ArrowRight" || e.key === "d") moveLane(1);
+  if (e.key === " " && status !== "playing") start();
+});
+
+renderPlayer();
+</script>
+</body>
+</html>
